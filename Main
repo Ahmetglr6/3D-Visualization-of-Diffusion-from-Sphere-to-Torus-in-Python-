@@ -1,0 +1,172 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, FFMpegWriter
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+# Function to create vertices of a sphere
+def create_sphere(u_res, v_res):
+    u = np.linspace(0, 2 * np.pi, u_res)
+    v = np.linspace(0, np.pi, v_res)
+    x = np.outer(np.cos(u), np.sin(v))
+    y = np.outer(np.sin(u), np.sin(v))
+    z = np.outer(np.ones(np.size(u)), np.cos(v))
+    return np.array([x.flatten(), y.flatten(), z.flatten()]).T
+
+# Function to create vertices of a torus
+def create_torus(u_res, v_res, ring_radius=1, tube_radius=0.3):
+    u = np.linspace(0, 2 * np.pi, u_res)
+    v = np.linspace(0, 2 * np.pi, v_res)
+    U, V = np.meshgrid(u, v)
+    x = (ring_radius + tube_radius * np.cos(V)) * np.cos(U)
+    y = (ring_radius + tube_radius * np.cos(V)) * np.sin(U)
+    z = tube_radius * np.sin(V)
+    return np.array([x.flatten(), y.flatten(), z.flatten()]).T
+
+# Function to create triangles connecting the vertices
+def create_triangles(u_res, v_res):
+    triangles = []
+    for i in range(u_res - 1):
+        for j in range(v_res - 1):
+            pt1 = i * v_res + j
+            pt2 = (i + 1) * v_res + j
+            pt3 = i * v_res + (j + 1)
+            pt4 = (i + 1) * v_res + (j + 1)
+            triangles.append([pt1, pt2, pt3])
+            triangles.append([pt2, pt4, pt3])
+    return np.array(triangles)
+
+# Function to propagate heat using the heat diffusion equation
+def propagate_heat(temperature, triangles, alpha=0.1):
+    new_temperature = temperature.copy()
+    for tri in triangles:
+        # Here, we can calculate the average temperature and apply diffusion
+        avg_temp = np.mean(temperature[tri])
+        for idx in tri:
+            new_temperature[idx] += alpha * (avg_temp - temperature[idx])  # Heat diffusion step
+    return new_temperature
+
+# Parameters for the spheres and toruses
+u_res_1, v_res_1 = 30, 15
+u_res_2, v_res_2 = 60, 30
+n_time_steps_1, n_time_steps_2 = 100, 100  # More time steps for smoother animation
+
+# Generate the vertices and triangles for both shapes
+vertices_sphere_1 = create_sphere(u_res_1, v_res_1)
+vertices_sphere_2 = create_sphere(u_res_2, v_res_2)
+triangles_1 = create_triangles(u_res_1, v_res_1)
+triangles_2 = create_triangles(u_res_2, v_res_2)
+
+# Initialize temperatures
+temperature_1 = np.zeros(len(vertices_sphere_1))
+temperature_1[:v_res_1] = 100  # North pole
+temperature_1[-v_res_1:] = 100  # South pole
+
+temperature_2 = np.zeros(len(vertices_sphere_2))
+temperature_2[:v_res_2] = 100  # North pole
+temperature_2[-v_res_2:] = 100  # South pole
+
+# Set up the figure for dual animation
+fig = plt.figure(figsize=(24, 18))
+ax1 = fig.add_subplot(221, projection='3d')
+ax2 = fig.add_subplot(222, projection='3d')
+ax_fft1 = fig.add_subplot(223)
+ax_fft2 = fig.add_subplot(224)
+
+# Update function for the animations
+def update(frame):
+    global temperature_1, temperature_2
+    blend_factor_1 = frame / (n_time_steps_1 - 1)
+    blend_factor_2 = frame / (n_time_steps_2 - 1)
+
+    # Create toroidal shapes
+    vertices_torus_1 = create_torus(u_res_1, v_res_1)
+    vertices_torus_2 = create_torus(u_res_2, v_res_2)
+
+    vertices_1 = (1 - blend_factor_1) * vertices_sphere_1 + blend_factor_1 * vertices_torus_1
+    vertices_2 = (1 - blend_factor_2) * vertices_sphere_2 + blend_factor_2 * vertices_torus_2
+
+    # Propagate heat using the diffusion method
+    temperature_1 = propagate_heat(temperature_1, triangles_1, alpha=0.1)
+    temperature_2 = propagate_heat(temperature_2, triangles_2, alpha=0.1)
+
+    # Clear previous plot data for both axes
+    ax1.cla()
+    ax2.cla()
+    ax_fft1.cla()
+    ax_fft2.cla()
+
+    # Plotting for the first subplot (Animation 1)
+    ax1.set_title(f"Animation 1: Sphere to Torus ({u_res_1} Longitudinal Resolution x {v_res_1} Latitudinal Resolution)", fontsize=16)
+    for tri in triangles_1:
+        tri_vertices = vertices_1[tri]
+        avg_temp = np.mean(temperature_1[tri])
+        normalized_temp = (avg_temp - np.min(temperature_1)) / (np.max(temperature_1) - np.min(temperature_1))
+        color = plt.cm.viridis(normalized_temp)
+        poly = Poly3DCollection([tri_vertices], color=color, edgecolor='k', linewidths=0.5, alpha=0.8)
+        ax1.add_collection3d(poly)
+
+    ax1.scatter(vertices_1[:, 0], vertices_1[:, 1], vertices_1[:, 2], color='r', s=8, alpha=0.5)
+    ax1.set_xlabel('X axis')
+    ax1.set_ylabel('Y axis')
+    ax1.set_zlabel('Z axis')
+    ax1.set_box_aspect([1, 1, 1])  # Aspect ratio is 1:1:1
+
+    # Plotting for the second subplot (Animation 2)
+    ax2.set_title(f"Animation 2: Sphere to Torus ({u_res_2} Longitudinal Resolution x {v_res_2} Latitudinal Resolution)", fontsize=16)
+    for tri in triangles_2:
+        tri_vertices = vertices_2[tri]
+        avg_temp = np.mean(temperature_2[tri])
+        normalized_temp = (avg_temp - np.min(temperature_2)) / (np.max(temperature_2) - np.min(temperature_2))
+        color = plt.cm.viridis(normalized_temp)
+        poly = Poly3DCollection([tri_vertices], color=color, edgecolor='k', linewidths=0.5, alpha=0.8)
+        ax2.add_collection3d(poly)
+
+    ax2.scatter(vertices_2[:, 0], vertices_2[:, 1], vertices_2[:, 2], color='r', s=8, alpha=0.5)
+    ax2.set_xlabel('X axis')
+    ax2.set_ylabel('Y axis')
+    ax2.set_zlabel('Z axis')
+    ax2.set_box_aspect([1, 1, 1])  # Aspect ratio is 1:1:1
+
+    # Calculate and plot the Fourier Transform for temperature data
+    fft_temp_1 = np.fft.fft(temperature_1)
+    fft_temp_2 = np.fft.fft(temperature_2)
+
+    freq_1 = np.fft.fftfreq(len(temperature_1), d=1)
+    freq_2 = np.fft.fftfreq(len(temperature_2), d=1)
+
+    # Plot FFT magnitude for Animation 1
+    ax_fft1.plot(freq_1[:len(freq_1)//2], np.abs(fft_temp_1)[:len(fft_temp_1)//2], color='blue', linewidth=2)
+    ax_fft1.set_title("FFT Magnitude (Animation 1)", fontsize=16)
+    ax_fft1.set_xlabel("Frequency", fontsize=14)
+    ax_fft1.set_ylabel("Magnitude", fontsize=14)
+    ax_fft1.grid()
+
+    # Set Y-axis limit dynamically
+    ax_fft1.set_ylim(0, np.max(np.abs(fft_temp_1)) * 1.1)
+    # Plot FFT magnitude for Animation 2
+    ax_fft2.plot(freq_2[:len(freq_2)//2], np.abs(fft_temp_2)[:len(fft_temp_2)//2], color='blue', linewidth=2)
+    ax_fft2.set_title("FFT Magnitude (Animation 2)", fontsize=16)
+    ax_fft2.set_xlabel("Frequency", fontsize=14)
+    ax_fft2.set_ylabel("Magnitude", fontsize=14)
+    ax_fft2.grid()
+
+    # Set Y-axis limit dynamically
+    ax_fft2.set_ylim(0, np.max(np.abs(fft_temp_2)) * 1.1)
+
+# Create the animations
+fps = 10  # Set frames per second
+anim = FuncAnimation(fig, update, frames=n_time_steps_1, repeat=False)
+
+# Save the animation as an MP4 file
+writer = FFMpegWriter(fps=fps)
+anim.save("dual_heat_transformation_with_fft.mp4", writer=writer)
+
+# Close the figure to avoid static display
+plt.close(fig)
+
+# Indicate that the file has been saved
+print("Dual animation with Fourier Transform saved as dual_heat_transformation_with_fft.mp4")
+
+# Download the saved file
+from google.colab import files
+files.download('dual_heat_transformation_with_fft.mp4')
